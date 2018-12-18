@@ -23,4 +23,4 @@ pfileshot diff file_name_a file_name_b
 
 
 ## License
-This repository is under AGPLv3 o later license.
+This repository is under MIT license.
