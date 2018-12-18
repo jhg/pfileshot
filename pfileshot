@@ -1,0 +1,112 @@
+#!/bin/bash
+
+# Script: pfileshot
+# Description: tool to check what different files are accessed by processes
+
+
+# Wrap command to get files accessed on Linux and Mac
+accessedFiles() {
+  local process_name="$1"
+  case "$(uname -s)" in
+    Linux* )
+      strace -ff -e trace=file -p "`pidof firefox`" 2>&1 \
+      | grep -o -e '".*"' \
+      | sed 's/^"\(.*\)"$/\1/'
+      ;;
+    Darwin* )
+      # NOTE: opensnoop require root privileges but not all script
+      echo 'Root required to run opensnoop to get files accessed' 1>&2
+      sudo opensnoop -n "$process_name" \
+      | sed 's/[[:space:]]*$//' \
+      | grep -o -e '\(/[^/]\+\)\+'
+      ;;
+    * )
+      echo "Error, platform $(uname -s) is not supported" 1>&2
+      exit 1
+      ;;
+  esac
+}
+
+# This will run when user press ctrl-c while running opensnoop in takeShot
+takeShotInt() {
+  local process_name="$1"
+  local shot_file="$2"
+  if [ -f "$shot_file" ]
+  then
+    echo -e '\n** CTRL-C'
+    # Sort by file path
+    cat "$shot_file" \
+    | sort -u -k2 \
+    > "$shot_file.pfileshot.tmp"
+    # Override list of files
+    rm -f "$shot_file"
+    mv "$shot_file.pfileshot.tmp" "$shot_file"
+    echo "Files accessed by $process_name were saved to $shot_file"
+    exit 0
+  else
+    echo "Error saving files accessed by $process_name"
+    exit 1
+  fi
+}
+
+
+takeShot() {
+  if [ $# -ne 2 ]
+  then
+    return 1
+  fi
+  local process_name="$1"
+  local shot_file="$2"
+  echo 'Taking shot, press CTRL-C to stop'
+  # To process accessed files list after user stop opensnoop with ctrl-c
+  trap "takeShotInt $process_name $shot_file" INT
+  # Get accessed files and process it with pipes
+  # to get a list of all accesed files with shasum
+  accessedFiles "$process_name" \
+  | xargs -I '{}' shasum '{}' 2> /dev/null \
+  > "$shot_file"
+}
+
+# Mainly a shortcut to visualize a diff style git diff
+diffShots() {
+  if [ $# -ne 2 ]
+  then
+    return 1
+  fi
+  local shot_file_a="$1"
+  local shot_file_b="$2"
+  diff -EwbBu "$shot_file_a" "$shot_file_b" \
+  | less
+}
+
+
+run_or_usage() {
+  if ! ${@:2}
+  then
+    usage "$1"
+    exit 1
+  fi
+}
+
+usage() {
+  echo "Usage: $1 [shot|diff] ..."
+  echo 'Tool to get files accesed by a process and compare different shots'
+  echo 'Examples:'
+  echo -e "\t$1 shot process_name shot_file"
+  echo -e "\t$1 diff shot_file_a shot_file_b"
+}
+
+
+# Entrypoint to check action to do
+case "$1" in
+  shot )
+    run_or_usage "$0" takeShot ${@:2}
+    ;;
+  diff )
+    run_or_usage "$0" diffShots ${@:2}
+    ;;
+  * )
+    usage "$0"
+    exit 1
+    ;;
+esac
